@@ -1,0 +1,112 @@
+
+rm(list=ls())
+install.packages(c("dmm","dplyr","plyr","reshape","ggplot2","data.table","psych","usdm","caret","DMwR","C50"))
+
+#getwd()
+setwd("C:/Users/gopin/Documents/R/CustomerTransaction")
+data = read.csv("train.csv", header = T)
+savedData = data
+
+# Outlier Analysis
+data1 = data[!names(data)%in% c("ID_code")]
+for(i in colnames(data1))
+{
+  #print(i)
+  values = data1[,i][data1[,i]%in%boxplot.stats(data1[,i])$out]
+  #print(length(values))
+  data1[,i][data1[,i]%in%values] = NA
+}
+#Removing outliers using KNN imputation
+require(DMwR)
+data1 = knnImputation(data1, k=5)
+# Not sufficient complete cases for computing neighbors.
+# Removing outliers using MEAN
+for(i in colnames(data1))
+{
+  data1$i[is.na(data1$i)] = mean(data1$i,na.rm = T)
+}
+# Check if any NA present or not
+for(i in colnames(data1))
+{
+  print(i)
+  sum(is.na(data1$i))
+}
+data1$target[is.na(data1$target)] = 1
+newData = data1
+# Select Dependent & Independent columns
+DependentCols = names(data1)%in% c("target")
+dependentData = data1[DependentCols]
+independentData = data1[!DependentCols]
+independentCols = colnames(independentData)
+
+data = data1[!names(data1)%in% c("ID_code")]
+
+#Check Multicollinearity
+install.packages("usdm")
+library(usdm)
+vif(data[,-201])
+vifcor(data[,-201], th=0.9)
+# Logistic Regression because of Categorical Target variable
+logistic_model = glm(target~. , data = data)
+logistic_prediction = predict(logistic_model)
+logistic_prediction = ifelse(logistic_prediction > 0.5, 1, 0)
+
+# KNN
+# data = data1[!names(data1)%in% c("ID_code")]
+trainData_index = sample(1:nrow(data), 0.8 * nrow(data), prob = NULL)
+trainData = data[trainData_index,]
+testData = data[-trainData_index,]
+# library(class)
+# knn_pred = knn(trainData[,2:200], testData[,2:200], trainData[,1])
+
+#install.packages("C50")
+library(C50)
+cols = names(trainData)
+trainData[cols] = lapply(trainData[cols] , factor)
+str(trainData)
+
+C50_model = C5.0(target~., trainData, trails = 100, rules = TRUE)
+write(capture.output(summary(C50_model)), "C50_rules.txt")
+C50_prediction = predict(C50_model, testData[,2:201], type="class")
+
+confusionMatrix = table(target, C50_prediction)
+ConfusionMatrix(confusionMatrix)
+TN = confusionMatrix[0,0]
+FN = confusionMatrix[1,0]
+TP = confusionMatrix[1,1]
+FP = confusionMatrix[0,1]
+totalObservations = (TN + FN + TP + FP)
+
+# Accuracy
+accuracy = (TP + TN)/totalObservations
+
+# Precision
+precision = TP/(TP + FP)
+
+# Recall
+recall = TP/(TP + FN)
+
+# False Negative Rate
+fnRate = FN/(FN + TP)
+
+library(ggplot2)
+library(scales)
+library(psych)
+library(gplots)
+
+# ggplot(aes(x='var_0', y='target'), data = data) +
+#   geom_point(stat = "identity", fill="Blue") + 
+#   theme_bw()+
+#   ylab("target") + xlab("var_0") +
+#   ggtitle("Scatter plot")
+
+ggplot(data, aes(as.factor("var_0"), "target")) + 
+  geom_point() + 
+  labs(y = "target", x = "var_0");
+
+ggplot(data, aes(as.factor("var_0"), "target")) +
+  geom_bar(stat = "identity") + 
+  labs(y = "Percentage correct", x = "Categorical variable")
+
+
+
